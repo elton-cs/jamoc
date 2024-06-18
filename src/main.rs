@@ -3,110 +3,133 @@ use bevy::prelude::*;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, spawn_and_gate)
+        .add_systems(Startup, (spawn_input_node_and_wire, spawn_timer).chain())
         .add_systems(
             Update,
-            (cycle_inputs, process_inputs, print_and_gate).chain(),
+            (
+                toggle_input_node,
+                process_node,
+                link_wire_input,
+                process_wire,
+                view_input_node,
+                view_wire,
+            )
+                .chain(),
         )
         .run();
 }
 
 #[derive(Component, Clone, Copy, Debug)]
-enum Bit {
-    I,
-    O,
-}
+struct Bit(bool);
 
 #[derive(Component, Clone, Copy, Debug)]
-struct InputA(Bit);
-
-#[derive(Component, Clone, Copy, Debug)]
-struct PropagateA(Entity);
-
-#[derive(Component, Clone, Copy, Debug)]
-struct InputB(Bit);
-
-#[derive(Component, Clone, Copy, Debug)]
-struct PropagateB(Entity);
+struct Input(Bit);
 
 #[derive(Component, Clone, Copy, Debug)]
 struct Output(Bit);
 
 #[derive(Component, Clone, Copy, Debug)]
-enum Gate {
-    AND,
-}
+struct ConnectionFrom(Entity);
 
-#[derive(Bundle)]
-struct StartGate {
-    marker: Gate,
-    input_a: InputA,
-    input_b: InputB,
+#[derive(Component, Clone, Copy, Debug)]
+struct _ConnectionTo(Entity);
+
+#[derive(Component, Clone, Copy, Debug)]
+struct Wire;
+
+#[derive(Bundle, Clone, Copy, Debug)]
+struct WireBundle {
+    marker: Wire,
+    input: Input,
+    connection_from: ConnectionFrom,
     output: Output,
 }
 
-#[derive(Bundle)]
-struct MidGate {
-    marker: Gate,
-    input_a: PropagateA,
-    input_b: PropagateB,
+#[derive(Component, Clone, Copy, Debug)]
+struct InputNode;
+
+#[derive(Bundle, Clone, Copy, Debug)]
+struct InputNodeBundle {
+    marker: InputNode,
+    input: Input,
     output: Output,
 }
 
-fn spawn_and_gate(mut commands: Commands) {
-    let init_bit = Bit::O;
-    let marker = Gate::AND;
-    let input_a = InputA(init_bit.clone());
-    let input_b = InputB(init_bit.clone());
-    let output = Output(init_bit);
+#[derive(Resource)]
+struct Clock {
+    timer: Timer,
+}
 
-    for i in 1..=3 {
-        commands.spawn(StartGate {
-            marker: marker.clone(),
-            input_a: input_a.clone(),
-            input_b: input_b.clone(),
-            output: output.clone(),
-        });
+fn spawn_input_node_and_wire(mut commands: Commands) {
+    let init_bit = Bit(false);
+
+    let node = commands
+        .spawn(InputNodeBundle {
+            marker: InputNode,
+            input: Input(init_bit),
+            output: Output(init_bit),
+        })
+        .id();
+
+    let _wire = commands
+        .spawn(WireBundle {
+            marker: Wire,
+            input: Input(init_bit),
+            connection_from: ConnectionFrom(node),
+            output: Output(init_bit),
+        })
+        .id();
+}
+
+fn process_node(mut query: Query<(&InputNode, &Input, &mut Output)>) {
+    for (_, input, mut output) in query.iter_mut() {
+        output.0 = input.0;
     }
 }
 
-fn cycle_inputs(mut query: Query<(&mut InputA, &mut InputB)>) {
-    for (mut input_a, mut input_b) in query.iter_mut() {
-        let (new_a, new_b) = match (input_a.0, input_b.0) {
-            (Bit::O, Bit::O) => (Bit::O, Bit::I),
-            (Bit::O, Bit::I) => (Bit::I, Bit::O),
-            (Bit::I, Bit::O) => (Bit::I, Bit::I),
-            (Bit::I, Bit::I) => (Bit::O, Bit::O),
-        };
-        input_a.0 = new_a;
-        input_b.0 = new_b;
+fn view_input_node(query: Query<(&InputNode, &Input, &Output)>) {
+    for (_, input, output) in query.iter() {
+        info!("InputNode: {:?} -> {:?}", input.0 .0, output.0 .0);
     }
 }
 
-fn process_inputs(mut query: Query<(&Gate, &InputA, &InputB, &mut Output)>) {
-    fn process_and(input_a: &InputA, input_b: &InputB) -> Bit {
-        let new_output = match (input_a.0, input_b.0) {
-            (Bit::I, Bit::I) => Bit::I,
-            _ => Bit::O,
-        };
-
-        new_output
-    }
-
-    for (gate, input_a, input_b, mut output) in query.iter_mut() {
-        let new_output = match gate {
-            Gate::AND => process_and(input_a, input_b),
-        };
-
-        output.0 = new_output;
+fn link_wire_input(
+    mut wire_query: Query<(&Wire, &mut Input, &ConnectionFrom)>,
+    node_query: Query<&Output>,
+) {
+    for (_, mut input, connection_from) in wire_query.iter_mut() {
+        let new_input = node_query.get(connection_from.0).unwrap();
+        input.0 = new_input.0;
     }
 }
 
-fn print_and_gate(query: Query<(Entity, &Gate, &InputA, &InputB, &Output)>) {
-    for (entity, gate, input_a, input_b, output) in query.iter() {
-        info!(
-            "{:?}: [{:?} | {:?}] = |{:?}| > [{:?}]",
-            entity, input_a.0, input_b.0, gate, output.0
-        );
+fn process_wire(mut query: Query<(&Wire, &Input, &mut Output)>) {
+    for (_, input, mut output) in query.iter_mut() {
+        output.0 = input.0;
+    }
+}
+
+fn view_wire(query: Query<(&Wire, &Input, &Output)>) {
+    for (_, input, output) in query.iter() {
+        info!("Wire: {:?} -> {:?}", input.0 .0, output.0 .0);
+    }
+}
+
+fn spawn_timer(mut commands: Commands) {
+    commands.insert_resource(Clock {
+        timer: Timer::from_seconds(1.0, TimerMode::Repeating),
+    });
+}
+
+fn toggle_input_node(
+    time: Res<Time>,
+    mut clock: ResMut<Clock>,
+    mut query: Query<(&InputNode, &mut Input)>,
+) {
+    clock.timer.tick(time.delta());
+    for (_, mut input) in query.iter_mut() {
+        if clock.timer.finished() {
+            input.0 = Bit(!input.0 .0);
+        }
     }
 }
