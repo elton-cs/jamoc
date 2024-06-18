@@ -13,15 +13,21 @@ fn main() {
 
 #[derive(Component, Clone, Copy, Debug)]
 enum Bit {
-    One,
-    Zero,
+    I,
+    O,
 }
 
 #[derive(Component, Clone, Copy, Debug)]
 struct InputA(Bit);
 
 #[derive(Component, Clone, Copy, Debug)]
+struct PropagateA(Entity);
+
+#[derive(Component, Clone, Copy, Debug)]
 struct InputB(Bit);
+
+#[derive(Component, Clone, Copy, Debug)]
+struct PropagateB(Entity);
 
 #[derive(Component, Clone, Copy, Debug)]
 struct Output(Bit);
@@ -32,22 +38,30 @@ enum Gate {
 }
 
 #[derive(Bundle)]
-struct GateBundle {
+struct StartGate {
     marker: Gate,
     input_a: InputA,
     input_b: InputB,
     output: Output,
 }
 
+#[derive(Bundle)]
+struct MidGate {
+    marker: Gate,
+    input_a: PropagateA,
+    input_b: PropagateB,
+    output: Output,
+}
+
 fn spawn_and_gate(mut commands: Commands) {
-    let init_bit = Bit::Zero;
+    let init_bit = Bit::O;
     let marker = Gate::AND;
     let input_a = InputA(init_bit.clone());
     let input_b = InputB(init_bit.clone());
     let output = Output(init_bit);
 
     for i in 1..=3 {
-        commands.spawn(GateBundle {
+        commands.spawn(StartGate {
             marker: marker.clone(),
             input_a: input_a.clone(),
             input_b: input_b.clone(),
@@ -59,10 +73,10 @@ fn spawn_and_gate(mut commands: Commands) {
 fn cycle_inputs(mut query: Query<(&mut InputA, &mut InputB)>) {
     for (mut input_a, mut input_b) in query.iter_mut() {
         let (new_a, new_b) = match (input_a.0, input_b.0) {
-            (Bit::Zero, Bit::Zero) => (Bit::Zero, Bit::One),
-            (Bit::Zero, Bit::One) => (Bit::One, Bit::Zero),
-            (Bit::One, Bit::Zero) => (Bit::One, Bit::One),
-            (Bit::One, Bit::One) => (Bit::Zero, Bit::Zero),
+            (Bit::O, Bit::O) => (Bit::O, Bit::I),
+            (Bit::O, Bit::I) => (Bit::I, Bit::O),
+            (Bit::I, Bit::O) => (Bit::I, Bit::I),
+            (Bit::I, Bit::I) => (Bit::O, Bit::O),
         };
         input_a.0 = new_a;
         input_b.0 = new_b;
@@ -72,8 +86,8 @@ fn cycle_inputs(mut query: Query<(&mut InputA, &mut InputB)>) {
 fn process_inputs(mut query: Query<(&Gate, &InputA, &InputB, &mut Output)>) {
     fn process_and(input_a: &InputA, input_b: &InputB) -> Bit {
         let new_output = match (input_a.0, input_b.0) {
-            (Bit::One, Bit::One) => Bit::One,
-            _ => Bit::Zero,
+            (Bit::I, Bit::I) => Bit::I,
+            _ => Bit::O,
         };
 
         new_output
@@ -88,13 +102,11 @@ fn process_inputs(mut query: Query<(&Gate, &InputA, &InputB, &mut Output)>) {
     }
 }
 
-fn print_and_gate(query: Query<(&Gate, &InputA, &InputB, &Output)>) {
-    let mut num_gates = 1;
-    for (gate, input_a, input_b, output) in query.iter() {
+fn print_and_gate(query: Query<(Entity, &Gate, &InputA, &InputB, &Output)>) {
+    for (entity, gate, input_a, input_b, output) in query.iter() {
         info!(
-            "{num_gates}: [{:?} | {:?}] ---|{:?}| ==> [{:?}]",
-            input_a.0, input_b.0, gate, output.0
+            "{:?}: [{:?} | {:?}] = |{:?}| > [{:?}]",
+            entity, input_a.0, input_b.0, gate, output.0
         );
-        num_gates += 1;
     }
 }
